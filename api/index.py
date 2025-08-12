@@ -131,7 +131,6 @@ def create_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/create_key")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
     expiration = data.get('expiration')
@@ -168,9 +167,7 @@ def create_key():
 def check_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
-        logger.warning("Unauthorized access attempt to /api/check_key")
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+        logger.warning("Unauthorized access attempt to /api/check_key")    
     key = request.args.get('key')
     if not key:
         return jsonify({'error': 'Key required'}), 400
@@ -209,7 +206,6 @@ def deactivate_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/deactivate_key")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
     key = data.get('key')
@@ -237,7 +233,6 @@ def get_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/get_loader_version")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
@@ -258,7 +253,6 @@ def update_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/update_loader_version")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
     version = data.get('version')
@@ -286,7 +280,6 @@ def add_admin():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') and session['username'] == 'admin' or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/add_admin")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
     username = data.get('username')
@@ -319,7 +312,6 @@ def add_admin():
 def generate_api_key():
     if not session.get('logged_in'):
         logger.warning("Unauthorized access attempt to /api/generate_api_key")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     api_key = secrets.token_hex(16)
     db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
@@ -341,7 +333,6 @@ def generate_api_key():
 def deactivate_api_key():
     if not session.get('logged_in'):
         logger.warning("Unauthorized access attempt to /api/deactivate_api_key")
-        return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
     api_key = data.get('api_key')

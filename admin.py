@@ -2,33 +2,36 @@ import sqlite3
 import datetime
 import secrets
 import requests
+import os
 from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)  # Secret key for sessions
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))  # Use environment variable for secret key
 
-# Discord Webhook URL (replace with your actual webhook URL)
-DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1404554572055314432/Rx8zeOpux6kE2UDMqlI--Nrhedh-TjcZE0_jE4raZh7g339IE_U3owS3i3yKgelTkjP4'
+# Discord Webhook URL from environment variable
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')  # Use environment variable for DB path
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS keys
-                 (key TEXT PRIMARY KEY, expiration DATE, status TEXT)''')  # status: 'active' or 'inactive'
+                 (key TEXT PRIMARY KEY, expiration DATE, status TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS admins
                  (username TEXT PRIMARY KEY, password_hash TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY, value TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS api_keys
-                 (api_key TEXT PRIMARY KEY, status TEXT, created_at DATE)''')  # New table for API keys
+                 (api_key TEXT PRIMARY KEY, status TEXT, created_at DATE)''')
     conn.commit()
     conn.close()
 
-# Add default admin if not exists (username: admin, password: password)
+# Add default admin if not exists
 def add_default_admin():
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT * FROM admins WHERE username='admin'")
     if not c.fetchone():
@@ -39,7 +42,8 @@ def add_default_admin():
 
 # Initialize settings
 def init_settings():
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT * FROM settings WHERE key='loader_version'")
     if not c.fetchone():
@@ -70,6 +74,9 @@ def get_geolocation(ip):
 
 # Function to send log to Discord webhook
 def send_discord_log(message):
+    if not DISCORD_WEBHOOK_URL:
+        print("Discord webhook URL not configured")
+        return
     data = {"content": message}
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=data)
@@ -78,7 +85,8 @@ def send_discord_log(message):
 
 # Function to validate API key
 def validate_api_key(api_key):
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT status FROM api_keys WHERE api_key=?", (api_key,))
     result = c.fetchone()
@@ -87,7 +95,6 @@ def validate_api_key(api_key):
 
 # API Endpoints
 
-# Create new key(s)
 @app.route('/api/create_key', methods=['POST'])
 def create_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
@@ -95,7 +102,7 @@ def create_key():
         return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
-    expiration = data.get('expiration')  # Expect YYYY-MM-DD format
+    expiration = data.get('expiration')
     count = data.get('count', 1)
     if not expiration:
         return jsonify({'error': 'Expiration date required'}), 400
@@ -107,7 +114,8 @@ def create_key():
     except ValueError:
         return jsonify({'error': 'Invalid date format'}), 400
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     keys_created = []
     for _ in range(count):
@@ -122,7 +130,6 @@ def create_key():
     
     return jsonify({'keys': keys_created, 'expiration': expiration, 'status': 'active'})
 
-# Check key status and validity
 @app.route('/api/check_key', methods=['GET'])
 def check_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
@@ -133,7 +140,8 @@ def check_key():
     if not key:
         return jsonify({'error': 'Key required'}), 400
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT expiration, status FROM keys WHERE key=?", (key,))
     result = c.fetchone()
@@ -157,7 +165,6 @@ def check_key():
         'valid': is_valid
     })
 
-# Deactivate key
 @app.route('/api/deactivate_key', methods=['POST'])
 def deactivate_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
@@ -169,7 +176,8 @@ def deactivate_key():
     if not key:
         return jsonify({'error': 'Key required'}), 400
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("UPDATE keys SET status='inactive' WHERE key=?", (key,))
     conn.commit()
@@ -180,14 +188,14 @@ def deactivate_key():
     
     return jsonify({'message': 'Key deactivated'})
 
-# Get loader version
 @app.route('/api/get_loader_version', methods=['GET'])
 def get_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         return jsonify({'error': 'Unauthorized'}), 401
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT value FROM settings WHERE key='loader_version'")
     result = c.fetchone()
@@ -196,7 +204,6 @@ def get_loader_version():
     version = result[0] if result else '1.0'
     return jsonify({'version': version})
 
-# Update loader version
 @app.route('/api/update_loader_version', methods=['POST'])
 def update_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
@@ -208,7 +215,8 @@ def update_loader_version():
     if not version:
         return jsonify({'error': 'Version required'}), 400
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("REPLACE INTO settings (key, value) VALUES ('loader_version', ?)", (version,))
     conn.commit()
@@ -219,7 +227,6 @@ def update_loader_version():
     
     return jsonify({'message': 'Loader version updated'})
 
-# Add new admin (only for 'admin')
 @app.route('/api/add_admin', methods=['POST'])
 def add_admin():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
@@ -234,7 +241,8 @@ def add_admin():
     
     password_hash = generate_password_hash(password)
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     try:
         c.execute("INSERT INTO admins (username, password_hash) VALUES (?, ?)", (username, password_hash))
@@ -249,14 +257,14 @@ def add_admin():
     
     return jsonify({'message': 'Admin added'})
 
-# Generate API key (admin-only)
 @app.route('/api/generate_api_key', methods=['POST'])
 def generate_api_key():
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
     
     api_key = secrets.token_hex(16)
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("INSERT INTO api_keys (api_key, status, created_at) VALUES (?, ?, ?)",
               (api_key, 'active', datetime.date.today().isoformat()))
@@ -266,7 +274,6 @@ def generate_api_key():
     send_discord_log(f"New API key generated: {api_key}")
     return jsonify({'api_key': api_key})
 
-# Deactivate API key
 @app.route('/api/deactivate_api_key', methods=['POST'])
 def deactivate_api_key():
     if not session.get('logged_in'):
@@ -277,7 +284,8 @@ def deactivate_api_key():
     if not api_key:
         return jsonify({'error': 'API key required'}), 400
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("UPDATE api_keys SET status='inactive' WHERE api_key=?", (api_key,))
     conn.commit()
@@ -288,7 +296,6 @@ def deactivate_api_key():
 
 # Admin Panel Routes
 
-# Login page
 @app.route('/admin/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -298,7 +305,8 @@ def login():
         geo_data = get_geolocation(client_ip)
         geo_info = f"IP: {geo_data['ip']}, City: {geo_data['city']}, Region: {geo_data['region']}, Country: {geo_data['country']}"
         
-        conn = sqlite3.connect('keys.db')
+        db_path = os.environ.get('DB_PATH', 'keys.db')
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("SELECT password_hash FROM admins WHERE username=?", (username,))
         result = c.fetchone()
@@ -310,7 +318,7 @@ def login():
             send_discord_log(f"Admin logged in: {username} from {geo_info}")
             return redirect(url_for('admin_panel'))
         else:
-            error_message = f"Failed login attempt: Username '{username}', Password '{password}' from {geo_info}"
+            error_message = f"Failed login attempt: Username '{username}', Password '****' from {geo_info}"
             send_discord_log(error_message)
             return render_template_string('''
             <!DOCTYPE html>
@@ -572,13 +580,13 @@ def login():
     </html>
     ''')
 
-# Admin panel
 @app.route('/admin', methods=['GET'])
 def admin_panel():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    conn = sqlite3.connect('keys.db')
+    db_path = os.environ.get('DB_PATH', 'keys.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT key, expiration, status FROM keys")
     keys = c.fetchall()
@@ -918,7 +926,6 @@ def admin_panel():
     </html>
     ''', keys_html=keys_html, api_keys_html=api_keys_html, is_super_admin=is_super_admin)
 
-# Logout
 @app.route('/admin/logout')
 def logout():
     session.pop('logged_in', None)
@@ -926,5 +933,8 @@ def logout():
     send_discord_log("Admin logged out")
     return redirect(url_for('login'))
 
-if __name__ == '__main__':
-    app.run()
+# Vercel serverless function handler
+from serverless_wsgi import handle_request
+
+def handler(event, context):
+    return handle_request(app, event, context)

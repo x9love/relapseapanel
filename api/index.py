@@ -1,4 +1,5 @@
-import sqlite3
+import psycopg2
+from psycopg2 import sql
 import datetime
 import secrets
 import requests
@@ -17,11 +18,10 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))  # Use envi
 # Discord Webhook URL from environment variable
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-# Database setup (SQLite for testing, switch to Vercel Postgres for production)
+# Database setup (Vercel Postgres)
 def init_db():
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS keys
                      (key TEXT PRIMARY KEY, expiration DATE, status TEXT)''')
@@ -33,21 +33,20 @@ def init_db():
                      (api_key TEXT PRIMARY KEY, status TEXT, created_at DATE)''')
         conn.commit()
         conn.close()
-        logger.info(f"Database initialized at {db_path}")
+        logger.info("Database initialized with Vercel Postgres")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
 # Add default admin if not exists
 def add_default_admin():
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("SELECT * FROM admins WHERE username='admin'")
+        c.execute("SELECT * FROM admins WHERE username=%s", ('admin',))
         if not c.fetchone():
             password_hash = generate_password_hash('password')
-            c.execute("INSERT INTO admins (username, password_hash) VALUES (?, ?)", ('admin', password_hash))
+            c.execute("INSERT INTO admins (username, password_hash) VALUES (%s, %s)", ('admin', password_hash))
             conn.commit()
             logger.info("Default admin created")
         conn.close()
@@ -57,13 +56,12 @@ def add_default_admin():
 
 # Initialize settings
 def init_settings():
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("SELECT * FROM settings WHERE key='loader_version'")
+        c.execute("SELECT * FROM settings WHERE key=%s", ('loader_version',))
         if not c.fetchone():
-            c.execute("INSERT INTO settings (key, value) VALUES ('loader_version', '1.0')")
+            c.execute("INSERT INTO settings (key, value) VALUES (%s, %s)", ('loader_version', '1.0'))
             conn.commit()
             logger.info("Settings initialized")
         conn.close()
@@ -112,11 +110,10 @@ def send_discord_log(message):
 
 # Function to validate API key
 def validate_api_key(api_key):
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("SELECT status FROM api_keys WHERE api_key=?", (api_key,))
+        c.execute("SELECT status FROM api_keys WHERE api_key=%s", (api_key,))
         result = c.fetchone()
         conn.close()
         return result and result[0] == 'active'
@@ -131,6 +128,7 @@ def create_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/create_key")
+         
     
     data = request.json
     expiration = data.get('expiration')
@@ -145,14 +143,13 @@ def create_key():
     except ValueError:
         return jsonify({'error': 'Invalid date format'}), 400
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
         keys_created = []
         for _ in range(count):
             key = secrets.token_hex(16)
-            c.execute("INSERT INTO keys (key, expiration, status) VALUES (?, ?, ?)", (key, expiration_date, 'active'))
+            c.execute("INSERT INTO keys (key, expiration, status) VALUES (%s, %s, %s)", (key, expiration_date, 'active'))
             keys_created.append(key)
         conn.commit()
         conn.close()
@@ -167,16 +164,17 @@ def create_key():
 def check_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
-        logger.warning("Unauthorized access attempt to /api/check_key")    
+        logger.warning("Unauthorized access attempt to /api/check_key")
+         
+    
     key = request.args.get('key')
     if not key:
         return jsonify({'error': 'Key required'}), 400
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("SELECT expiration, status FROM keys WHERE key=?", (key,))
+        c.execute("SELECT expiration, status FROM keys WHERE key=%s", (key,))
         result = c.fetchone()
         conn.close()
         
@@ -206,17 +204,17 @@ def deactivate_key():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/deactivate_key")
+         
     
     data = request.json
     key = data.get('key')
     if not key:
         return jsonify({'error': 'Key required'}), 400
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("UPDATE keys SET status='inactive' WHERE key=?", (key,))
+        c.execute("UPDATE keys SET status=%s WHERE key=%s", ('inactive', key))
         conn.commit()
         conn.close()
         
@@ -233,12 +231,12 @@ def get_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/get_loader_version")
+         
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("SELECT value FROM settings WHERE key='loader_version'")
+        c.execute("SELECT value FROM settings WHERE key=%s", ('loader_version',))
         result = c.fetchone()
         conn.close()
         
@@ -253,17 +251,18 @@ def update_loader_version():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/update_loader_version")
+         
     
     data = request.json
     version = data.get('version')
     if not version:
         return jsonify({'error': 'Version required'}), 400
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("REPLACE INTO settings (key, value) VALUES ('loader_version', ?)", (version,))
+        c.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=%s",
+                  ('loader_version', version, version))
         conn.commit()
         conn.close()
         
@@ -280,6 +279,7 @@ def add_admin():
     api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
     if not (session.get('logged_in') and session['username'] == 'admin' or validate_api_key(api_key)):
         logger.warning("Unauthorized access attempt to /api/add_admin")
+         
     
     data = request.json
     username = data.get('username')
@@ -289,11 +289,10 @@ def add_admin():
     
     password_hash = generate_password_hash(password)
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("INSERT INTO admins (username, password_hash) VALUES (?, ?)", (username, password_hash))
+        c.execute("INSERT INTO admins (username, password_hash) VALUES (%s, %s)", (username, password_hash))
         conn.commit()
         conn.close()
         
@@ -301,7 +300,7 @@ def add_admin():
         send_discord_log(log_message)
         
         return jsonify({'message': 'Admin added'})
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         conn.close()
         return jsonify({'error': 'Username already exists'}), 400
     except Exception as e:
@@ -312,13 +311,13 @@ def add_admin():
 def generate_api_key():
     if not session.get('logged_in'):
         logger.warning("Unauthorized access attempt to /api/generate_api_key")
+         
     
     api_key = secrets.token_hex(16)
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("INSERT INTO api_keys (api_key, status, created_at) VALUES (?, ?, ?)",
+        c.execute("INSERT INTO api_keys (api_key, status, created_at) VALUES (%s, %s, %s)",
                   (api_key, 'active', datetime.date.today().isoformat()))
         conn.commit()
         conn.close()
@@ -333,17 +332,17 @@ def generate_api_key():
 def deactivate_api_key():
     if not session.get('logged_in'):
         logger.warning("Unauthorized access attempt to /api/deactivate_api_key")
+         
     
     data = request.json
     api_key = data.get('api_key')
     if not api_key:
         return jsonify({'error': 'API key required'}), 400
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
-        c.execute("UPDATE api_keys SET status='inactive' WHERE api_key=?", (api_key,))
+        c.execute("UPDATE api_keys SET status=%s WHERE api_key=%s", ('inactive', api_key))
         conn.commit()
         conn.close()
         
@@ -364,11 +363,10 @@ def login():
         geo_data = get_geolocation(client_ip)
         geo_info = f"IP: {geo_data['ip']}, City: {geo_data['city']}, Region: {geo_data['region']}, Country: {geo_data['country']}"
         
-        db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
         try:
-            conn = sqlite3.connect(db_path)
+            conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
             c = conn.cursor()
-            c.execute("SELECT password_hash FROM admins WHERE username=?", (username,))
+            c.execute("SELECT password_hash FROM admins WHERE username=%s", (username,))
             result = c.fetchone()
             conn.close()
             
@@ -648,9 +646,8 @@ def admin_panel():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    db_path = os.environ.get('DB_PATH', '/tmp/keys.db')
     try:
-        conn = sqlite3.connect(db_path)
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         c = conn.cursor()
         c.execute("SELECT key, expiration, status FROM keys")
         keys = c.fetchall()

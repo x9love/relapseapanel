@@ -1,0 +1,4 @@
+{
+    "builds": [{"src": "admin.py", "use": "@vercel/python"}],
+    "routes": [{"src": "/(.*)", "dest": "admin.py"}]
+}
